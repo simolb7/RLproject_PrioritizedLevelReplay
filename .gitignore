@@ -1,0 +1,41 @@
+--- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+
+--- Python cache / build ---
+pycache/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+--- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+--- Jupyter ---
+.ipynb_checkpoints/
+
+--- Logs / runs / checkpoints ---
+runs/
+logs/
+*.log
+*.csv
+*.pt
+*.pth
+.ckpt
+
+--- Env / secrets ---
+.env
+.env.

@@ -13,7 +13,7 @@ train:
   total_updates: 2000
   num_steps: 256               # rollout length per update
   seed: 42
-  device: cpu                  # "cuda" se disponibile
+  device: cuda                  # "cuda" se disponibile
   save_every: 200
   out_dir: runs
 

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.optim as optim
+import gymnasium as gym
 
 from procgen import ProcgenEnv
 from gym3 import ToBaselinesVecEnv
@@ -20,16 +21,19 @@ from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
 
 def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_mode: str):
-    env = ProcgenEnv(
+    venv = ProcgenEnv(
         num_envs=num_envs,
         env_name=env_name,
         distribution_mode=distribution_mode,
         start_level=int(level_id),
-        num_levels=1,              # IMPORTANT: fissa un singolo level_id
+        num_levels=1,
     )
-    venv = ToBaselinesVecEnv(env)
-    # Procgen spesso ritorna dict {"rgb": ...} -> estraiamo "rgb"
-    venv = VecExtractDictObs(venv, "rgb")
+
+    # Procgen può restituire obs dict con chiave "rgb" oppure direttamente array.
+    # Se è Dict, estraiamo "rgb".
+    if isinstance(venv.observation_space, gym.spaces.Dict):
+        venv = VecExtractDictObs(venv, "rgb")
+
     venv = VecMonitor(venv)
     return venv
 
@@ -39,6 +43,13 @@ def to_torch_obs(obs_np: np.ndarray, device: str) -> torch.Tensor:
     x = torch.from_numpy(obs_np).to(device=device, dtype=torch.float32)
     x = x.permute(0, 3, 1, 2) / 255.0
     return x
+
+
+def unwrap_obs(obs):
+    # Procgen può restituire dict con chiave "rgb"
+    if isinstance(obs, dict):
+        return obs["rgb"]
+    return obs
 
 
 def load_config(path: str):
@@ -116,6 +127,7 @@ def main(config_path: str = "configs/default.yaml"):
             distribution_mode=cfg["env"]["distribution_mode"],
         )
         obs = env.reset()
+        obs = unwrap_obs(obs)
 
         # rollout storage
         obs_buf = np.zeros((num_steps, num_envs, 64, 64, 3), dtype=np.uint8)
@@ -141,6 +153,7 @@ def main(config_path: str = "configs/default.yaml"):
 
             actions = action_t.cpu().numpy()
             next_obs, reward, done, infos = env.step(actions)
+            next_obs = unwrap_obs(next_obs)
 
             actions_buf[t] = actions
             logprobs_buf[t] = logp_t.cpu().numpy()
