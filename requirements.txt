@@ -1,0 +1,9 @@
+torch>=2.1
+numpy>=1.24
+pyyaml>=6.0
+tqdm>=4.66
+
+procgen>=0.10.7
+gym3>=0.3.3
+stable-baselines3>=2.2.1
+gymnasium>=0.29

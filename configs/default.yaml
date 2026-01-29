@@ -1,0 +1,36 @@
+env:
+  name: coinrun
+  distribution_mode: hard
+  num_envs: 8
+
+levels:
+  train_level_max: 2000        # i nuovi livelli di train saranno in [0, train_level_max)
+  test_level_start: 100000      # test in [test_level_start, test_level_start + test_levels)
+  test_levels: 200
+  test_episodes_per_level: 1
+
+train:
+  total_updates: 2000
+  num_steps: 256               # rollout length per update
+  seed: 42
+  device: cpu                  # "cuda" se disponibile
+  save_every: 200
+  out_dir: runs
+
+ppo:
+  learning_rate: 0.0005
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  update_epochs: 3
+  minibatches: 4
+
+plr:
+  p_new: 0.5                   # probabilità di usare un nuovo livello vs replay
+  buffer_size: 5000
+  alpha: 0.5                   # rank prioritization strength
+  rho: 0.2                     # mix staleness
+  score_ema_beta: 0.9
