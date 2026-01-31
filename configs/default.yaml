@@ -6,8 +6,8 @@ env:
 levels:
   train_level_max: 2000        # i nuovi livelli di train saranno in [0, train_level_max)
   test_level_start: 100000      # test in [test_level_start, test_level_start + test_levels)
-  test_levels: 200
-  test_episodes_per_level: 1
+  test_levels: 500
+  test_episodes_per_level: 3
 
 train:
   total_updates: 2000
@@ -30,7 +30,7 @@ ppo:
 
 plr:
   p_new: 0.5                   # probabilità di usare un nuovo livello vs replay
-  buffer_size: 5000
+  buffer_size: 10000
   alpha: 0.5                   # rank prioritization strength
   rho: 0.2                     # mix staleness
   score_ema_beta: 0.9

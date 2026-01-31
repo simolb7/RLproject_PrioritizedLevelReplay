@@ -13,15 +13,13 @@ from ppo_procgen import Agent
 
 
 def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_mode: str):
-    env = ProcgenEnv(
+    venv = ProcgenEnv(
         num_envs=num_envs,
         env_name=env_name,
         distribution_mode=distribution_mode,
         start_level=int(level_id),
         num_levels=1,
     )
-    venv = ToBaselinesVecEnv(env)
-    venv = VecExtractDictObs(venv, "rgb")
     venv = VecMonitor(venv)
     return venv
 
@@ -30,6 +28,12 @@ def to_torch_obs(obs_np: np.ndarray, device: str) -> torch.Tensor:
     x = torch.from_numpy(obs_np).to(device=device, dtype=torch.float32)
     x = x.permute(0, 3, 1, 2) / 255.0
     return x
+
+
+def unwrap_obs(obs):
+    if isinstance(obs, dict):
+        return obs["rgb"]
+    return obs
 
 
 def load_yaml(path: str):
@@ -62,12 +66,14 @@ def evaluate(cfg, ckpt_path: str):
         env = make_procgen_vec(cfg["env"]["name"], 1, level_id, cfg["env"]["distribution_mode"])  # eval: 1 env
         for _ in range(episodes_per_level):
             obs = env.reset()
+            obs = unwrap_obs(obs)
             done = False
             ep_ret = 0.0
             while not done:
                 obs_t = to_torch_obs(obs, device)
                 action, _, _, _ = agent.get_action_and_value(obs_t)
                 obs, reward, done_arr, infos = env.step(action.cpu().numpy())
+                obs = unwrap_obs(obs)
                 done = bool(done_arr[0])
                 ep_ret += float(reward[0])
             returns.append(ep_ret)
