@@ -1,4 +1,4 @@
-# src/train_plr_procgen.py
+# src/train_plr_procgen.py (MINIMAL FIXES - ONLY CRITICAL CHANGES)
 from __future__ import annotations
 import os
 import time
@@ -67,6 +67,11 @@ def main(config_path: str = "configs/default.yaml"):
     torch.manual_seed(seed)
 
     device = cfg["train"]["device"]
+    # FIX 1: Device handling robusto
+    if device == "cuda" and not torch.cuda.is_available():
+        print("CUDA richiesta ma non disponibile: fallback a CPU")
+        device = "cpu"
+    
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
     run_name = f'{cfg["env"]["name"]}_plr_{int(time.time())}'
@@ -76,15 +81,19 @@ def main(config_path: str = "configs/default.yaml"):
     # PLR components
     buffer = LevelBuffer(
         max_size=int(cfg["plr"]["buffer_size"]),
-        score_ema_beta=float(cfg["plr"]["score_ema_beta"]),
+        score_ema_beta=float(cfg["plr"].get("score_ema_beta", 0.99)),
         rng=random.Random(seed),
     )
+    
+    # FIX 2: Sampler con temperature e staleness_coef (CRITICAL!)
     sampler = PLRSampler(
         buffer=buffer,
         train_level_max=int(cfg["levels"]["train_level_max"]),
         p_new=float(cfg["plr"]["p_new"]),
-        alpha=float(cfg["plr"]["alpha"]),
-        rho=float(cfg["plr"]["rho"]),
+        alpha=float(cfg["plr"].get("alpha", 1.0)),
+        temperature=float(cfg["plr"].get("temperature", 0.1)),
+        staleness_coef=float(cfg["plr"].get("staleness_coef", 0.1)),
+        warmup_updates=int(cfg["plr"].get("warmup_updates", 100)),
         rng_seed=seed,
     )
 
@@ -187,8 +196,8 @@ def main(config_path: str = "configs/default.yaml"):
             gae_lambda=h.gae_lambda,
         )
 
-        # PLR score: mean(abs(adv)) (paper-style proxy)
-        score = float(adv_t.abs().mean().item())
+        # FIX 3: Score calculation CORRETTO - usa L1 value loss invece di GAE (CRITICAL!)
+        score = float((ret_t - values_t).abs().mean().item())
         buffer.update(level_id=level_id, score=score, global_step=global_step)
 
         # flatten batch

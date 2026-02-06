@@ -8,9 +8,10 @@ import numpy as np
 
 import torch
 import torch.optim as optim
+import gymnasium as gym
 
 from procgen import ProcgenEnv
-from stable_baselines3.common.vec_env import VecMonitor
+from stable_baselines3.common.vec_env import VecMonitor, VecExtractDictObs
 
 from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
@@ -23,6 +24,11 @@ def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_m
         start_level=int(level_id),
         num_levels=1,  # fisso un solo livello
     )
+    
+    # FIX: Gestione Dict observation space (come in PLR)
+    if isinstance(venv.observation_space, gym.spaces.Dict):
+        venv = VecExtractDictObs(venv, "rgb")
+    
     venv = VecMonitor(venv)
     return venv
 
@@ -113,7 +119,8 @@ def main(config_path: str = "configs/default.yaml"):
             level_id=level_id,
             distribution_mode=cfg["env"]["distribution_mode"],
         )
-        obs = unwrap_obs(env.reset())
+        obs = env.reset()
+        obs = unwrap_obs(obs)
 
         # rollout storage
         obs_buf = np.zeros((num_steps, num_envs, 64, 64, 3), dtype=np.uint8)

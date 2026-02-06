@@ -7,7 +7,7 @@ levels:
   train_level_max: 2000        # i nuovi livelli di train saranno in [0, train_level_max)
   test_level_start: 100000      # test in [test_level_start, test_level_start + test_levels)
   test_levels: 500
-  test_episodes_per_level: 3
+  test_episodes_per_level: 1
 
 train:
   total_updates: 2000
@@ -29,8 +29,20 @@ ppo:
   minibatches: 4
 
 plr:
+  # Sampling strategy
   p_new: 0.5                   # probabilità di usare un nuovo livello vs replay
-  buffer_size: 10000
-  alpha: 0.5                   # rank prioritization strength
-  rho: 0.2                     # mix staleness
-  score_ema_beta: 0.9
+  
+  # Buffer management
+  buffer_size: 4000            # dimensione buffer (originale usa 4000-5000)
+  score_ema_beta: 0.99         # smoothing factor per score (originale usa 0.99)
+  
+  # Prioritization parameters
+  alpha: 1.0                   # rank prioritization strength (originale: 1.0, più alto = più uniforme)
+  temperature: 0.1             # sampling temperature (originale: 0.1, più basso = più focus su hard levels)
+  staleness_coef: 0.1          # staleness bonus coefficient (originale: 0.1)
+  
+  # Warmup
+  warmup_updates: 100          # numero di updates per popolare il buffer prima del replay
+  
+  # Score calculation
+  score_metric: "value_l1"     # "value_l1" (L1 value loss), "gae" (GAE magnitude), "max_gae"
