@@ -38,11 +38,13 @@ plr:
   
   # Prioritization parameters
   alpha: 1.0                   # rank prioritization strength (originale: 1.0, più alto = più uniforme)
-  temperature: 0.1             # sampling temperature (originale: 0.1, più basso = più focus su hard levels)
-  staleness_coef: 0.1          # staleness bonus coefficient (originale: 0.1)
+  temperature: 0.3             # sampling temperature (originale: 0.1, più basso = più focus su hard levels)
+  staleness_coef: 0.3          # staleness bonus coefficient (originale: 0.1)
   
   # Warmup
   warmup_updates: 100          # numero di updates per popolare il buffer prima del replay
+  temperature_schedule: "constant"
   
   # Score calculation
   score_metric: "value_l1"     # "value_l1" (L1 value loss), "gae" (GAE magnitude), "max_gae"
+  score_transform: "normalize"

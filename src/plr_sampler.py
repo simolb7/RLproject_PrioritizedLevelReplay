@@ -1,4 +1,3 @@
-# src/plr_sampler.py (CORRECTED VERSION)
 from __future__ import annotations
 from typing import List, Tuple
 import numpy as np
@@ -8,21 +7,18 @@ from plr_buffer import LevelBuffer, LevelInfo
 
 def _rank_probs(values: List[Tuple[int, float]], alpha: float, temperature: float = 1.0) -> Tuple[np.ndarray, List[int]]:
     """
-    values: list of (level_id, metric_value). Più alto = più prioritario.
-    Rank-based: p(rank) ∝ 1 / rank^alpha, rank=1 è il migliore.
-    Temperature: controls sharpness of distribution (lower = more concentrated on high scores)
+    Rank-based prioritization with temperature control.
+    Higher values = higher priority.
     """
-    # Ordina decrescente (migliore prima)
     values_sorted = sorted(values, key=lambda x: x[1], reverse=True)
     n = len(values_sorted)
     ranks = np.arange(1, n + 1, dtype=np.float64)
     
-    # Apply rank-based weighting with temperature
+    # Rank-based weighting
     weights = 1.0 / (ranks ** float(alpha))
     
-    # Apply temperature (lower temp = sharper distribution)
+    # Temperature scaling (in log space for stability)
     if temperature != 1.0:
-        # Use log-space for numerical stability
         log_weights = np.log(weights + 1e-10)
         log_weights = log_weights / temperature
         weights = np.exp(log_weights - log_weights.max())
@@ -31,7 +27,7 @@ def _rank_probs(values: List[Tuple[int, float]], alpha: float, temperature: floa
     return probs, [lvl for (lvl, _) in values_sorted]
 
 
-class PLRSampler:
+class PLRSamplerImproved:
     def __init__(
         self,
         buffer: LevelBuffer,
@@ -41,40 +37,36 @@ class PLRSampler:
         temperature: float,
         staleness_coef: float,
         warmup_updates: int = 100,
+        temperature_schedule: str = "constant",  # "constant", "linear_decay", "adaptive"
+        score_transform: str = "normalize",  # "none", "normalize", "standardize"
         rng_seed: int = 0
     ):
-        """
-        Args:
-            buffer: LevelBuffer instance
-            train_level_max: maximum level ID for new levels
-            p_new: probability of sampling a new level (only used during warmup)
-            alpha: rank prioritization strength (higher = more uniform)
-            temperature: sampling temperature (lower = more focused on high scores)
-            staleness_coef: coefficient for staleness bonus (higher = more revisiting of old levels)
-            warmup_updates: number of updates to only sample new levels
-            rng_seed: random seed
-        """
         self.buffer = buffer
         self.train_level_max = int(train_level_max)
         self.p_new = float(p_new)
         self.alpha = float(alpha)
+        self.base_temperature = float(temperature)
         self.temperature = float(temperature)
         self.staleness_coef = float(staleness_coef)
         self.warmup_updates = int(warmup_updates)
+        self.temperature_schedule = temperature_schedule
+        self.score_transform = score_transform
         self.rng = np.random.default_rng(rng_seed)
         self.update_count = 0
         
-        # Track sampling statistics
+        # Statistics tracking
         self.new_level_samples = 0
         self.replay_level_samples = 0
+        self.score_stats = {"mean": 0.0, "std": 1.0, "min": 0.0, "max": 1.0}
 
     def sample_level(self, global_step: int) -> Tuple[int, str]:
         """
         Returns (level_id, mode) where mode is "warmup", "new", or "replay".
         """
         self.update_count += 1
+        self._update_temperature()
         
-        # Warmup period: only sample new levels to populate buffer
+        # Warmup: only new levels
         if self.update_count <= self.warmup_updates:
             lvl = self._sample_new_level_uniform()
             return lvl, "warmup"
@@ -89,35 +81,90 @@ class PLRSampler:
         self.replay_level_samples += 1
         return lvl, "replay"
 
+    def _update_temperature(self):
+        """Update temperature based on schedule."""
+        if self.temperature_schedule == "constant":
+            return
+        
+        if self.temperature_schedule == "linear_decay":
+            # Decay from base_temperature to base_temperature * 0.5 over training
+            progress = min(1.0, self.update_count / (self.warmup_updates * 10))
+            self.temperature = self.base_temperature * (1.0 - 0.5 * progress)
+        
+        elif self.temperature_schedule == "adaptive":
+            # Increase temperature if buffer diversity is low
+            if len(self.buffer) > 10:
+                infos = self.buffer.get_all()
+                scores = [li.score for li in infos]
+                score_std = float(np.std(scores))
+                # Lower std = less diversity = increase temperature
+                diversity_factor = max(0.5, min(2.0, 1.0 / (score_std + 0.1)))
+                self.temperature = self.base_temperature * diversity_factor
+
     def _sample_new_level_uniform(self) -> int:
-        """Sample a new level uniformly at random from [0, train_level_max)"""
+        """Sample a new level uniformly."""
         return int(self.rng.integers(0, self.train_level_max))
+
+    def _update_score_stats(self, scores: List[float]):
+        """Update running statistics for score normalization."""
+        if len(scores) == 0:
+            return
+        
+        scores_arr = np.array(scores)
+        self.score_stats = {
+            "mean": float(np.mean(scores_arr)),
+            "std": float(np.std(scores_arr)) + 1e-8,
+            "min": float(np.min(scores_arr)),
+            "max": float(np.max(scores_arr)) + 1e-8
+        }
+
+    def _transform_score(self, score: float) -> float:
+        """Transform score based on selected method."""
+        if self.score_transform == "none":
+            return score
+        
+        elif self.score_transform == "normalize":
+            # Min-max normalization to [0, 1]
+            score_range = self.score_stats["max"] - self.score_stats["min"]
+            return (score - self.score_stats["min"]) / max(score_range, 1e-8)
+        
+        elif self.score_transform == "standardize":
+            # Z-score standardization
+            return (score - self.score_stats["mean"]) / self.score_stats["std"]
+        
+        return score
 
     def _sample_replay_level(self, global_step: int) -> int:
         """
-        Sample a level from the buffer using score + staleness.
-        
-        Following the original PLR implementation:
-        1. Calculate combined score = base_score + staleness_bonus
-        2. Apply rank-based prioritization with temperature
-        3. Sample from the resulting distribution
+        Sample from buffer using score + staleness with improved normalization.
         """
         infos: List[LevelInfo] = self.buffer.get_all()
         
         if len(infos) == 0:
-            # Fallback: sample new level
             return self._sample_new_level_uniform()
         
-        # Calculate combined score with staleness bonus
+        # Update score statistics
+        base_scores = [li.score for li in infos]
+        self._update_score_stats(base_scores)
+        
+        # Calculate combined scores with normalized staleness
+        max_staleness = max(1.0, float(global_step - min(li.last_seen_step for li in infos)))
+        
         combined_scores = []
         for li in infos:
+            # Transform base score
+            transformed_score = self._transform_score(li.score)
+            
+            # Normalized staleness bonus
             staleness = float(global_step - li.last_seen_step)
-            # Staleness bonus: older levels get higher bonus
-            staleness_bonus = self.staleness_coef * staleness
-            combined_score = li.score + staleness_bonus
+            normalized_staleness = staleness / max_staleness
+            staleness_bonus = self.staleness_coef * normalized_staleness
+            
+            # Combined score
+            combined_score = transformed_score + staleness_bonus
             combined_scores.append((li.level_id, combined_score))
         
-        # Apply rank-based prioritization with temperature
+        # Apply rank-based prioritization
         probs, levels = _rank_probs(combined_scores, self.alpha, self.temperature)
         
         # Sample
@@ -125,7 +172,7 @@ class PLRSampler:
         return int(levels[chosen_idx])
     
     def get_sampling_stats(self) -> dict:
-        """Return statistics about sampling behavior"""
+        """Return detailed sampling statistics."""
         total = self.new_level_samples + self.replay_level_samples
         return {
             "new_samples": self.new_level_samples,
@@ -133,5 +180,8 @@ class PLRSampler:
             "replay_ratio": self.replay_level_samples / max(1, total),
             "buffer_size": len(self.buffer),
             "update_count": self.update_count,
-            "warmup_complete": self.update_count > self.warmup_updates
+            "warmup_complete": self.update_count > self.warmup_updates,
+            "current_temperature": self.temperature,
+            "score_mean": self.score_stats["mean"],
+            "score_std": self.score_stats["std"]
         }
