@@ -1,5 +1,4 @@
 env:
-  name: coinrun
   distribution_mode: hard
   num_envs: 8
 

@@ -52,7 +52,7 @@ def load_config(path: str):
         return yaml.safe_load(f)
 
 
-def main(config_path: str = "configs/default.yaml"):
+def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     cfg = load_config(config_path)
 
     # seeds
@@ -69,13 +69,13 @@ def main(config_path: str = "configs/default.yaml"):
 
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
-    run_name = f'{cfg["env"]["name"]}_baseline_{int(time.time())}'
+    run_name = f'{env_name}_baseline_{int(time.time())}'
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
     # bootstrap env per action space
     tmp_env = make_procgen_vec(
-        cfg["env"]["name"],
+        env_name,
         cfg["env"]["num_envs"],
         level_id=0,
         distribution_mode=cfg["env"]["distribution_mode"],
@@ -114,7 +114,7 @@ def main(config_path: str = "configs/default.yaml"):
         mode = "uniform"
 
         env = make_procgen_vec(
-            env_name=cfg["env"]["name"],
+            env_name=env_name,
             num_envs=num_envs,
             level_id=level_id,
             distribution_mode=cfg["env"]["distribution_mode"],
@@ -222,4 +222,9 @@ def main(config_path: str = "configs/default.yaml"):
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser"], help="Environment name")
+    ap.add_argument("--config", default="configs/default.yaml", help="Config path")
+    args = ap.parse_args()
+    main(config_path=args.config, env_name=args.env)

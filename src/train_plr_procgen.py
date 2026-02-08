@@ -124,7 +124,7 @@ def calculate_level_score(
         return float((returns - values).abs().mean().item())
 
 
-def main(config_path: str = "configs/default.yaml"):
+def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     cfg = load_config(config_path)
 
     # Seeds
@@ -140,7 +140,7 @@ def main(config_path: str = "configs/default.yaml"):
     
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
-    run_name = f'{cfg["env"]["name"]}_plr_improved_{int(time.time())}'
+    run_name = f'{env_name}_plr_improved_{int(time.time())}'
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
@@ -171,7 +171,7 @@ def main(config_path: str = "configs/default.yaml"):
 
     # Bootstrap env
     tmp_env = make_procgen_vec(
-        cfg["env"]["name"], 
+        env_name, 
         cfg["env"]["num_envs"], 
         level_id=0, 
         distribution_mode=cfg["env"]["distribution_mode"]
@@ -223,7 +223,7 @@ def main(config_path: str = "configs/default.yaml"):
         level_visits[level_id] += 1
 
         env = make_procgen_vec(
-            env_name=cfg["env"]["name"],
+            env_name=env_name,
             num_envs=num_envs,
             level_id=level_id,
             distribution_mode=cfg["env"]["distribution_mode"],
@@ -374,6 +374,7 @@ def main(config_path: str = "configs/default.yaml"):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser"], help="Environment name")
     ap.add_argument("--config", default="configs/default.yaml")
     args = ap.parse_args()
-    main(args.config)
+    main(args.config, args.env)

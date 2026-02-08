@@ -42,11 +42,11 @@ def load_yaml(path: str):
 
 
 @torch.no_grad()
-def evaluate(cfg, ckpt_path: str):
+def evaluate(cfg, ckpt_path: str, env_name: str):
     device = cfg["train"]["device"]
 
     # init env to get n_actions
-    tmp = make_procgen_vec(cfg["env"]["name"], cfg["env"]["num_envs"], 0, cfg["env"]["distribution_mode"])
+    tmp = make_procgen_vec(env_name, cfg["env"]["num_envs"], 0, cfg["env"]["distribution_mode"])
     n_actions = tmp.action_space.n
     tmp.close()
 
@@ -63,7 +63,7 @@ def evaluate(cfg, ckpt_path: str):
 
     for i in range(test_levels):
         level_id = test_start + i
-        env = make_procgen_vec(cfg["env"]["name"], 1, level_id, cfg["env"]["distribution_mode"])  # eval: 1 env
+        env = make_procgen_vec(env_name, 1, level_id, cfg["env"]["distribution_mode"])  # eval: 1 env
         for _ in range(episodes_per_level):
             obs = env.reset()
             obs = unwrap_obs(obs)
@@ -87,9 +87,10 @@ def evaluate(cfg, ckpt_path: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser"], help="Environment name")
     ap.add_argument("--config", default="configs/default.yaml")
     ap.add_argument("--ckpt", required=True)
     args = ap.parse_args()
 
     cfg = load_yaml(args.config)
-    evaluate(cfg, args.ckpt)
+    evaluate(cfg, args.ckpt, args.env)
