@@ -18,39 +18,6 @@ from plr_sampler import PLRSamplerImproved
 from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
 
-def make_procgen_vec_multi(env_name: str, num_envs: int, level_ids: list, distribution_mode: str):
-    """
-    Create vectorized env with DIFFERENT levels per env.
-    This is crucial for PLR to get diverse score estimates.
-    """
-    envs = []
-    for level_id in level_ids:
-        venv = ProcgenEnv(
-            num_envs=1,
-            env_name=env_name,
-            distribution_mode=distribution_mode,
-            start_level=int(level_id),
-            num_levels=1,
-        )
-        
-        if isinstance(venv.observation_space, gym.spaces.Dict):
-            venv = VecExtractDictObs(venv, "rgb")
-        
-        envs.append(venv)
-    
-    # Stack environments
-    from stable_baselines3.common.vec_env import DummyVecEnv
-    
-    def make_env(procgen_env):
-        def _init():
-            return procgen_env
-        return _init
-    
-    # Note: This is a simplification - in practice you'd use a proper wrapper
-    # For now, we'll use the single-level approach but with better score calculation
-    return None
-
-
 def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_mode: str):
     """Standard single-level vectorized environment."""
     venv = ProcgenEnv(
@@ -86,42 +53,38 @@ def load_config(path: str):
 
 
 def calculate_level_score(
-    returns: torch.Tensor,
-    values: torch.Tensor,
-    method: str = "value_l1"
+    advantages: torch.Tensor,
+    method: str = "gae"
 ) -> float:
     """
     Calculate score for a level using different methods.
     
+    CRITICAL FIX: The paper uses GAE magnitude, not (returns - values).
+    GAE is already computed by compute_gae() and stored in advantages.
+    
     Args:
-        returns: (T, N) bootstrapped returns
-        values: (T, N) value predictions
+        advantages: (T, N) GAE advantages from compute_gae()
         method: scoring method
     
     Returns:
         Scalar score (higher = more learning potential)
     """
-    if method == "value_l1":
-        # L1 value loss - paper's preferred metric
-        return float((returns - values).abs().mean().item())
-    
-    elif method == "value_l2":
-        # L2 value loss
-        return float(((returns - values) ** 2).mean().sqrt().item())
-    
-    elif method == "gae":
-        # Use GAE magnitude as proxy (advantages = returns - values for unbiased estimator)
-        advantages = returns - values
+    if method == "gae":
+        # Paper's method: mean absolute GAE
+        # S_l = (1/T) * Σ |GAE_t|
         return float(advantages.abs().mean().item())
     
     elif method == "max_gae":
         # Max absolute GAE (for extremely hard levels)
-        advantages = returns - values
         return float(advantages.abs().max().item())
     
+    elif method == "gae_std":
+        # Standard deviation of GAE (variance in value estimates)
+        return float(advantages.std().item())
+    
     else:
-        # Default: value_l1
-        return float((returns - values).abs().mean().item())
+        # Default: mean absolute GAE
+        return float(advantages.abs().mean().item())
 
 
 def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
@@ -140,7 +103,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
-    run_name = f'{env_name}_plr_improved_{int(time.time())}'
+    run_name = f'{env_name}_plr_fixed_{int(time.time())}'
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
@@ -151,7 +114,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     # PLR components with improved sampler
     buffer = LevelBuffer(
         max_size=int(cfg["plr"]["buffer_size"]),
-        score_ema_beta=float(cfg["plr"].get("score_ema_beta", 0.99)),
+        score_ema_beta=float(cfg["plr"].get("score_ema_beta", 0.90)),
         eviction_mode=cfg["plr"].get("eviction_mode", "score_staleness"),
         rng=random.Random(seed),
     )
@@ -160,12 +123,12 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         buffer=buffer,
         train_level_max=int(cfg["levels"]["train_level_max"]),
         p_new=float(cfg["plr"]["p_new"]),
-        alpha=float(cfg["plr"].get("alpha", 1.0)),
+        alpha=float(cfg["plr"].get("alpha", 0.8)),
         temperature=float(cfg["plr"].get("temperature", 0.1)),
-        staleness_coef=float(cfg["plr"].get("staleness_coef", 0.3)),  # Increased default
-        warmup_updates=int(cfg["plr"].get("warmup_updates", 100)),
+        staleness_coef=float(cfg["plr"].get("staleness_coef", 0.1)),
+        warmup_updates=int(cfg["plr"].get("warmup_updates", 50)),
         temperature_schedule=cfg["plr"].get("temperature_schedule", "constant"),
-        score_transform=cfg["plr"].get("score_transform", "normalize"),
+        score_transform=cfg["plr"].get("score_transform", "none"),
         rng_seed=seed,
     )
 
@@ -202,7 +165,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     num_steps = int(cfg["train"]["num_steps"])
     num_envs = int(cfg["env"]["num_envs"])
     save_every = int(cfg["train"]["save_every"])
-    score_method = cfg["plr"].get("score_metric", "value_l1")
+    score_method = cfg["plr"].get("score_metric", "gae")
 
     global_step = 0
     
@@ -277,6 +240,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         dones_t = torch.from_numpy(dones_buf).to(device)
         values_t = torch.from_numpy(values_buf).to(device)
 
+        # Compute GAE
         adv_t, ret_t = compute_gae(
             rewards=rewards_t,
             dones=dones_t,
@@ -286,8 +250,10 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
             gae_lambda=h.gae_lambda,
         )
 
-        # Calculate score using selected method
-        score = calculate_level_score(ret_t, values_t, method=score_method)
+        # === CRITICAL FIX ===
+        # Score is the magnitude of GAE (advantages), NOT (returns - values)
+        # The paper explicitly states: S_l = (1/T) * Σ |GAE_t|
+        score = calculate_level_score(adv_t, method=score_method)
         buffer.update(level_id=level_id, score=score, global_step=global_step)
 
         # Flatten batch
@@ -374,7 +340,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser"], help="Environment name")
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "dodgeball", "starpilot"], help="Environment name")
     ap.add_argument("--config", default="configs/default.yaml")
     args = ap.parse_args()
     main(args.config, args.env)

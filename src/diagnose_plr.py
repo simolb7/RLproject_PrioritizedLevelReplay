@@ -1,161 +1,194 @@
 #!/usr/bin/env python3
 """
-Quick diagnostic script per capire perché PLR non funziona.
-Usa: python diagnose_plr.py runs/coinrun_plr_<timestamp>/train_log.csv
+Analyze training logs to diagnose NaN issues.
+Usage: python diagnose_nan.py path/to/train_log.csv
 """
-
 import sys
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
-def diagnose_plr(log_path):
-    print("="*70)
-    print("🔍 PLR DIAGNOSTIC REPORT")
-    print("="*70)
+def analyze_log(log_path: str):
+    """Analyze training log for NaN patterns."""
+    print(f"Analyzing: {log_path}\n")
     
-    # Carica log
-    df = pd.read_csv(log_path)
-    df_clean = df.dropna(subset=['score', 'mean_ep_return'])
+    try:
+        df = pd.read_csv(log_path)
+    except Exception as e:
+        print(f"ERROR reading log: {e}")
+        return
     
-    print(f"\n📊 BASIC INFO")
+    print("="*60)
+    print("LOG STATISTICS")
+    print("="*60)
     print(f"Total updates: {len(df)}")
-    print(f"Updates with valid data: {len(df_clean)}")
+    print(f"Columns: {list(df.columns)}\n")
     
-    # === 1. MODE DISTRIBUTION ===
-    print(f"\n🎲 SAMPLING MODE DISTRIBUTION")
-    mode_counts = df['mode'].value_counts()
-    total = len(df)
+    # Check for NaNs in each column
+    print("NaN counts by column:")
+    for col in df.columns:
+        nan_count = df[col].isna().sum()
+        if nan_count > 0:
+            first_nan_idx = df[col].isna().idxmax()
+            print(f"  {col:20s}: {nan_count:4d} NaNs (first at update {df.loc[first_nan_idx, 'update']})")
+        else:
+            print(f"  {col:20s}: 0 NaNs")
     
-    for mode, count in mode_counts.items():
-        pct = (count / total) * 100
-        print(f"  {mode:12s}: {count:4d} ({pct:5.1f}%)")
+    print("\n" + "="*60)
+    print("CRITICAL EVENTS")
+    print("="*60)
     
-    # Check replay ratio
-    warmup_count = mode_counts.get('warmup', 0)
-    new_count = mode_counts.get('new', 0)
-    replay_count = mode_counts.get('replay', 0)
+    # Find when NaNs first appear
+    score_nans = df['score'].isna()
+    ret_nans = df['mean_ep_return'].isna()
     
-    if warmup_count + new_count + replay_count > 0:
-        replay_ratio = replay_count / (new_count + replay_count) if (new_count + replay_count) > 0 else 0
-        print(f"\n  Replay Ratio (after warmup): {replay_ratio:.2%}")
+    if score_nans.any():
+        first_score_nan = df[score_nans].iloc[0]
+        print(f"\n❌ First score NaN at update {first_score_nan['update']}")
+        print(f"   Level: {first_score_nan['level_id']}")
+        print(f"   Mode: {first_score_nan['mode']}")
         
-        if replay_ratio < 0.3:
-            print(f"  ⚠️  WARNING: Replay ratio is LOW! PLR might not be working.")
-            print(f"      → Try: reduce p_new to 0.3 or 0.2")
-        elif replay_ratio > 0.7:
-            print(f"  ✅ Good replay ratio!")
+        # Show context around first NaN
+        idx = score_nans.idxmax()
+        print("\n   Context (5 updates before NaN):")
+        context = df.iloc[max(0, idx-5):idx+1]
+        print(context[['update', 'mode', 'level_id', 'score', 'mean_ep_return']])
     
-    # === 2. SCORE ANALYSIS ===
-    print(f"\n📈 SCORE DISTRIBUTION")
-    scores = df_clean['score']
+    if ret_nans.any() and not ret_nans.all():
+        first_ret_nan = df[ret_nans].iloc[0]
+        print(f"\n⚠️  First return NaN at update {first_ret_nan['update']}")
     
-    print(f"  Mean:   {scores.mean():.4f}")
-    print(f"  Median: {scores.median():.4f}")
-    print(f"  Std:    {scores.std():.4f}")
-    print(f"  Min:    {scores.min():.4f}")
-    print(f"  Max:    {scores.max():.4f}")
+    # Check if scores are exploding before NaN
+    if not score_nans.all():
+        valid_scores = df[~score_nans]['score']
+        print(f"\nScore statistics (before NaN):")
+        print(f"  Mean: {valid_scores.mean():.6f}")
+        print(f"  Std:  {valid_scores.std():.6f}")
+        print(f"  Max:  {valid_scores.max():.6f}")
+        print(f"  Min:  {valid_scores.min():.6f}")
+        
+        if valid_scores.max() > 100:
+            print("  ⚠️  WARNING: Scores > 100 detected (possible explosion)")
+        
+        # Find rapid score changes
+        score_diff = valid_scores.diff().abs()
+        large_jumps = score_diff[score_diff > 10]
+        if len(large_jumps) > 0:
+            print(f"\n  ⚠️  {len(large_jumps)} large score jumps (>10) detected")
+            print(f"     Largest jump: {score_diff.max():.2f}")
     
-    # Check if using GAE vs value loss
-    if scores.mean() < 0.1:
-        print(f"\n  ❌ CRITICAL: Scores are too low ({scores.mean():.4f})")
-        print(f"      This suggests you're using GAE instead of value loss!")
-        print(f"      → Fix: score = float((ret_t - values_t).abs().mean().item())")
-    elif scores.mean() > 0.15:
-        print(f"  ✅ Scores look good (using value loss)")
+    # Check episode returns
+    if not ret_nans.all():
+        valid_rets = df[~ret_nans]['mean_ep_return']
+        print(f"\nReturn statistics:")
+        print(f"  Mean: {valid_rets.mean():.2f}")
+        print(f"  Std:  {valid_rets.std():.2f}")
+        print(f"  Max:  {valid_rets.max():.2f}")
+        print(f"  Min:  {valid_rets.min():.2f}")
     
-    # Check score variance
-    if scores.std() < 0.05:
-        print(f"\n  ⚠️  WARNING: Low score variance ({scores.std():.4f})")
-        print(f"      Levels might be too similar in difficulty.")
-        print(f"      → Try: increase train_level_max or use different distribution_mode")
+    # Check buffer growth
+    if 'buffer_size' in df.columns:
+        print(f"\nBuffer statistics:")
+        print(f"  Final size: {df['buffer_size'].iloc[-1]}")
+        print(f"  Max size:   {df['buffer_size'].max()}")
     
-    # === 3. RETURN ANALYSIS ===
-    print(f"\n🎯 EPISODE RETURN ANALYSIS")
-    returns = df_clean['mean_ep_return']
+    if 'replay_ratio' in df.columns:
+        valid_replay = df[~df['replay_ratio'].isna()]['replay_ratio']
+        if len(valid_replay) > 0:
+            print(f"  Final replay ratio: {valid_replay.iloc[-1]:.3f}")
     
-    print(f"  Mean:   {returns.mean():.2f}")
-    print(f"  Median: {returns.median():.2f}")
-    print(f"  Std:    {returns.std():.2f}")
-    print(f"  Min:    {returns.min():.2f}")
-    print(f"  Max:    {returns.max():.2f}")
+    # Visualization
+    print("\n" + "="*60)
+    print("GENERATING PLOTS")
+    print("="*60)
     
-    # Check learning progress
-    first_half = returns.iloc[:len(returns)//2].mean()
-    second_half = returns.iloc[len(returns)//2:].mean()
-    improvement = ((second_half / first_half) - 1) * 100
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
-    print(f"\n  First half mean:  {first_half:.2f}")
-    print(f"  Second half mean: {second_half:.2f}")
-    print(f"  Improvement:      {improvement:+.1f}%")
+    # Plot 1: Score over time
+    ax = axes[0, 0]
+    ax.plot(df['update'], df['score'], 'b-', alpha=0.7, label='Score')
+    ax.set_xlabel('Update')
+    ax.set_ylabel('Score')
+    ax.set_title('Level Score Over Time')
+    ax.grid(True, alpha=0.3)
+    if score_nans.any():
+        first_nan = score_nans.idxmax()
+        ax.axvline(df.loc[first_nan, 'update'], color='red', linestyle='--', 
+                   label=f'First NaN (update {df.loc[first_nan, "update"]})')
+    ax.legend()
     
-    if improvement < 5:
-        print(f"\n  ⚠️  WARNING: Low improvement ({improvement:.1f}%)")
-        print(f"      Agent might not be learning much.")
-        print(f"      → Try: longer training, easier levels, or check PPO hyperparams")
+    # Plot 2: Returns over time
+    ax = axes[0, 1]
+    ax.plot(df['update'], df['mean_ep_return'], 'g-', alpha=0.7, label='Mean Return')
+    ax.set_xlabel('Update')
+    ax.set_ylabel('Episode Return')
+    ax.set_title('Episode Returns Over Time')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
     
-    # === 4. LEVEL DIVERSITY ===
-    print(f"\n🗺️  LEVEL DIVERSITY")
-    unique_levels = df['level_id'].nunique()
-    total_levels_seen = len(df)
+    # Plot 3: Buffer size and replay ratio
+    ax = axes[1, 0]
+    if 'buffer_size' in df.columns:
+        ax.plot(df['update'], df['buffer_size'], 'purple', label='Buffer Size')
+    ax.set_xlabel('Update')
+    ax.set_ylabel('Buffer Size')
+    ax.set_title('Buffer Growth')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
     
-    print(f"  Unique levels seen: {unique_levels}")
-    print(f"  Total updates:      {total_levels_seen}")
-    print(f"  Diversity ratio:    {unique_levels/total_levels_seen:.2%}")
+    # Plot 4: Replay ratio
+    ax = axes[1, 1]
+    if 'replay_ratio' in df.columns:
+        ax.plot(df['update'], df['replay_ratio'], 'orange', label='Replay Ratio')
+    ax.set_xlabel('Update')
+    ax.set_ylabel('Replay Ratio')
+    ax.set_title('Replay vs New Levels')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
     
-    # Most visited levels
-    top_levels = df['level_id'].value_counts().head(10)
-    print(f"\n  Top 10 most visited levels:")
-    for i, (level, count) in enumerate(top_levels.items(), 1):
-        pct = (count / total_levels_seen) * 100
-        print(f"    {i:2d}. Level {level:5d}: {count:3d} visits ({pct:4.1f}%)")
+    plt.tight_layout()
+    plot_path = log_path.replace('.csv', '_diagnostics.png')
+    plt.savefig(plot_path, dpi=150)
+    print(f"Plot saved to: {plot_path}")
     
-    # Check if curriculum is working
-    max_visit_pct = (top_levels.iloc[0] / total_levels_seen) * 100
-    if max_visit_pct > 10:
-        print(f"\n  ⚠️  Top level visited {max_visit_pct:.1f}% of the time")
-        print(f"      → This might indicate strong curriculum (good!)")
-        print(f"      → Or temperature is too low (overfitting to few levels)")
+    # Summary diagnosis
+    print("\n" + "="*60)
+    print("DIAGNOSIS")
+    print("="*60)
     
-    # === 5. RECOMMENDATIONS ===
-    print(f"\n💡 RECOMMENDATIONS")
-    
-    issues = []
-    
-    if replay_ratio < 0.3:
-        issues.append("• LOW REPLAY RATIO: Reduce p_new to 0.2-0.3")
-    
-    if scores.mean() < 0.1:
-        issues.append("• WRONG SCORE METRIC: Use value loss instead of GAE")
-    
-    if scores.std() < 0.05:
-        issues.append("• LOW SCORE VARIANCE: Increase level diversity")
-    
-    if improvement < 5:
-        issues.append("• LOW LEARNING: Increase training length or check hyperparams")
-    
-    if max_visit_pct > 15:
-        issues.append("• POSSIBLE OVERFITTING: Increase temperature (0.1 or higher)")
-    
-    if len(issues) == 0:
-        print("  ✅ No major issues detected!")
-        print("  → If PLR still equals baseline, try:")
-        print("    - Reduce temperature to 0.05 or 0.01")
-        print("    - Increase staleness_coef to 0.3-0.5")
-        print("    - Reduce p_new to 0.2-0.3")
+    if score_nans.any():
+        first_nan_update = df[score_nans].iloc[0]['update']
+        
+        if first_nan_update < 50:
+            print("❌ IMMEDIATE CRASH (NaN in first 50 updates)")
+            print("   Likely causes:")
+            print("   1. Bug in score calculation")
+            print("   2. Observation normalization issue")
+            print("   3. Incompatible PyTorch/CUDA versions")
+        elif first_nan_update < 500:
+            print("⚠️  EARLY CRASH (NaN before update 500)")
+            print("   Likely causes:")
+            print("   1. Exploding gradients")
+            print("   2. Learning rate too high")
+            print("   3. Advantage normalization issue")
+        else:
+            print("⚠️  LATE CRASH (NaN after update 500)")
+            print("   Likely causes:")
+            print("   1. Policy collapse on specific hard level")
+            print("   2. Value function divergence")
+            print("   3. Buffer selecting pathological levels")
     else:
-        for issue in issues:
-            print(f"  {issue}")
+        print("✓ No NaNs detected in scores")
     
-    print("\n" + "="*70)
-    print("End of diagnostic report")
-    print("="*70)
-
+    print("\nRecommended fixes:")
+    print("1. Use train_plr_stable.py with NaN detection")
+    print("2. Reduce learning rate to 0.00025")
+    print("3. Use config_stable.yaml with temperature=0.2")
+    print("4. Check GPU/CUDA compatibility")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python diagnose_plr.py <path_to_train_log.csv>")
-        print("Example: python diagnose_plr.py runs/coinrun_plr_1234567/train_log.csv")
+    if len(sys.argv) < 2:
+        print("Usage: python diagnose_nan.py path/to/train_log.csv")
         sys.exit(1)
     
-    log_path = sys.argv[1]
-    diagnose_plr(log_path)
+    analyze_log(sys.argv[1])

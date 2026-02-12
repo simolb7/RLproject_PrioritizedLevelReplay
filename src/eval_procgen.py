@@ -87,7 +87,7 @@ def evaluate(cfg, ckpt_path: str, env_name: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser"], help="Environment name")
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "dodgeball", "starpilot"], help="Environment name")
     ap.add_argument("--config", default="configs/default.yaml")
     ap.add_argument("--ckpt", required=True)
     args = ap.parse_args()
