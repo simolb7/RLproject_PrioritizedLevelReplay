@@ -341,6 +341,6 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "dodgeball", "starpilot"], help="Environment name")
-    ap.add_argument("--config", default="configs/default.yaml")
+    ap.add_argument("--config", default="configs/coinrun.yaml")
     args = ap.parse_args()
     main(args.config, args.env)

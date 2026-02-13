@@ -1,0 +1,41 @@
+env:
+  distribution_mode: hard
+  num_envs: 8
+
+levels:
+  train_level_max: 2000
+  test_level_start: 100000
+  test_levels: 100
+  test_episodes_per_level: 1
+
+train:
+  total_updates: 2000
+  num_steps: 256
+  seed: 42
+  device: cuda
+  save_every: 200
+  out_dir: runs
+
+ppo:
+  learning_rate: 0.0005
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  update_epochs: 3
+  minibatches: 4
+
+plr:
+  p_new: 0.4                    
+  buffer_size: 1000
+  score_ema_beta: 0.90
+  alpha: 1.0                   
+  temperature: 0.15            
+  staleness_coef: 0.1
+  warmup_updates: 50
+  temperature_schedule: "constant"
+  score_metric: "value_l1"     
+  score_transform: "standardize" 
+  eviction_mode: "score_staleness"
