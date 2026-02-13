@@ -73,10 +73,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Save config
-    with open(os.path.join(run_dir, "config.yaml"), "w") as f:
-        yaml.dump(cfg, f)
-
     # Bootstrap env for action space
     tmp_env = make_procgen_vec(
         env_name,
@@ -262,7 +258,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "dodgeball", "starpilot"], help="Environment name")
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "starpilot", "jumper"], help="Environment name")
     ap.add_argument("--config", default="configs/coinrun.yaml", help="Config path")
     args = ap.parse_args()
     main(config_path=args.config, env_name=args.env)

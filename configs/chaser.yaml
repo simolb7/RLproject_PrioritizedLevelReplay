@@ -28,14 +28,14 @@ ppo:
   minibatches: 4
 
 plr:
-  p_new: 0.25
+  p_new: 0.3                    
   buffer_size: 1000
   score_ema_beta: 0.90
-  alpha: 0.7
-  temperature: 0.08
+  alpha: 0.9
+  temperature: 0.12
   staleness_coef: 0.1
   warmup_updates: 50
   temperature_schedule: "constant"
-  score_metric: "gae"
-  score_transform: "none"
+  score_metric: "value_l1"      
+  score_transform: "standardize"
   eviction_mode: "score_staleness"

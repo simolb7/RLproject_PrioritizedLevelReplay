@@ -30,6 +30,7 @@ Thumbs.db
 --- Logs / runs / checkpoints ---
 runs/
 logs/
+save_render/
 *.log
 *.csv
 *.pt

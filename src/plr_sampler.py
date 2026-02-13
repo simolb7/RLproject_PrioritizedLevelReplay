@@ -27,7 +27,7 @@ def _rank_probs(values: List[Tuple[int, float]], alpha: float, temperature: floa
     return probs, [lvl for (lvl, _) in values_sorted]
 
 
-class PLRSamplerImproved:
+class PLRSampler:
     def __init__(
         self,
         buffer: LevelBuffer,

@@ -28,14 +28,14 @@ ppo:
   minibatches: 4
 
 plr:
-  p_new: 0.25
+  p_new: 0.25                   # Più replay
   buffer_size: 1000
   score_ema_beta: 0.90
-  alpha: 0.7
-  temperature: 0.08
+  alpha: 0.7                    # Focus aggressivo
+  temperature: 0.08             # Distribuzione sharp
   staleness_coef: 0.1
   warmup_updates: 50
   temperature_schedule: "constant"
-  score_metric: "gae"
+  score_metric: "gae"           # Ha funzionato su Coinrun/Starpilot
   score_transform: "none"
   eviction_mode: "score_staleness"

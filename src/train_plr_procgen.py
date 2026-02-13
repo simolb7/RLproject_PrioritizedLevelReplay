@@ -14,7 +14,7 @@ from procgen import ProcgenEnv
 from stable_baselines3.common.vec_env import VecMonitor, VecExtractDictObs
 
 from plr_buffer import LevelBuffer
-from plr_sampler import PLRSamplerImproved
+from plr_sampler import PLRSampler
 from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
 
@@ -103,13 +103,9 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
-    run_name = f'{env_name}_plr_fixed_{int(time.time())}'
+    run_name = f'{env_name}_plr_{int(time.time())}'
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
-
-    # Save config
-    with open(os.path.join(run_dir, "config.yaml"), "w") as f:
-        yaml.dump(cfg, f)
 
     # PLR components with improved sampler
     buffer = LevelBuffer(
@@ -119,7 +115,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         rng=random.Random(seed),
     )
     
-    sampler = PLRSamplerImproved(
+    sampler = PLRSampler(
         buffer=buffer,
         train_level_max=int(cfg["levels"]["train_level_max"]),
         p_new=float(cfg["plr"]["p_new"]),
@@ -173,10 +169,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     log_path = os.path.join(run_dir, "train_log.csv")
     with open(log_path, "w") as f:
         f.write("update,global_step,mode,level_id,score,mean_ep_return,buffer_size,replay_ratio,temperature\n")
-    
-    stats_log_path = os.path.join(run_dir, "buffer_stats.csv")
-    with open(stats_log_path, "w") as f:
-        f.write("update,buffer_size,mean_score,std_score,mean_staleness,replay_ratio\n")
 
     # Level visit tracking for diagnostics
     level_visits = defaultdict(int)
@@ -291,14 +283,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
                    f"{sampling_stats['buffer_size']},{sampling_stats['replay_ratio']:.3f},"
                    f"{sampling_stats['current_temperature']:.3f}\n")
 
-        # Buffer statistics every 10 updates
-        if update % 10 == 0:
-            buffer_stats = buffer.get_statistics(global_step)
-            with open(stats_log_path, "a") as f:
-                f.write(f"{update},{buffer_stats['size']},{buffer_stats['mean_score']:.6f},"
-                       f"{buffer_stats['std_score']:.6f},{buffer_stats['mean_staleness']:.1f},"
-                       f"{sampling_stats['replay_ratio']:.3f}\n")
-
         # Console output
         if update % 50 == 0:
             print(f"[{update}/{total_updates}] mode={mode} lvl={level_id} score={score:.4f} "
@@ -331,7 +315,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     print(f"\nTraining complete!")
     print(f"Model saved: {final_path}")
     print(f"Logs: {log_path}")
-    print(f"Buffer stats: {stats_log_path}")
     print(f"\nFinal buffer size: {len(buffer)}")
     print(f"Unique levels visited: {len(level_visits)}")
     print(f"Total replay ratio: {sampling_stats['replay_ratio']:.3f}")
@@ -340,7 +323,7 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "dodgeball", "starpilot"], help="Environment name")
+    ap.add_argument("--env", default="coinrun", choices=["coinrun", "bigfish", "chaser", "starpilot", "jumper"], help="Environment name")
     ap.add_argument("--config", default="configs/coinrun.yaml")
     args = ap.parse_args()
     main(args.config, args.env)

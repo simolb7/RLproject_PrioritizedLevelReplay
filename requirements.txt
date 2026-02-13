@@ -2,6 +2,7 @@ torch --index-url https://download.pytorch.org/whl/cu121
 numpy>=1.24
 pyyaml>=6.0
 tqdm>=4.66
+pygame
 
 procgen>=0.10.7
 gym3>=0.3.3
