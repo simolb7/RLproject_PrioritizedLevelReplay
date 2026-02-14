@@ -19,7 +19,6 @@ from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
 
 def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_mode: str):
-    """Standard single-level vectorized environment."""
     venv = ProcgenEnv(
         num_envs=num_envs,
         env_name=env_name,
@@ -56,41 +55,23 @@ def calculate_level_score(
     advantages: torch.Tensor,
     method: str = "gae"
 ) -> float:
-    """
-    Calculate score for a level using different methods.
-    
-    CRITICAL FIX: The paper uses GAE magnitude, not (returns - values).
-    GAE is already computed by compute_gae() and stored in advantages.
-    
-    Args:
-        advantages: (T, N) GAE advantages from compute_gae()
-        method: scoring method
-    
-    Returns:
-        Scalar score (higher = more learning potential)
-    """
     if method == "gae":
-        # Paper's method: mean absolute GAE
-        # S_l = (1/T) * Σ |GAE_t|
+
         return float(advantages.abs().mean().item())
     
     elif method == "max_gae":
-        # Max absolute GAE (for extremely hard levels)
         return float(advantages.abs().max().item())
     
     elif method == "gae_std":
-        # Standard deviation of GAE (variance in value estimates)
         return float(advantages.std().item())
     
     else:
-        # Default: mean absolute GAE
         return float(advantages.abs().mean().item())
 
 
 def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     cfg = load_config(config_path)
 
-    # Seeds
     seed = int(cfg["train"]["seed"])
     random.seed(seed)
     np.random.seed(seed)
@@ -107,7 +88,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # PLR components with improved sampler
     buffer = LevelBuffer(
         max_size=int(cfg["plr"]["buffer_size"]),
         score_ema_beta=float(cfg["plr"].get("score_ema_beta", 0.90)),
@@ -128,7 +108,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         rng_seed=seed,
     )
 
-    # Bootstrap env
     tmp_env = make_procgen_vec(
         env_name, 
         cfg["env"]["num_envs"], 
@@ -165,12 +144,10 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 
     global_step = 0
     
-    # Enhanced logging
     log_path = os.path.join(run_dir, "train_log.csv")
     with open(log_path, "w") as f:
         f.write("update,global_step,mode,level_id,score,mean_ep_return,buffer_size,replay_ratio,temperature\n")
 
-    # Level visit tracking for diagnostics
     level_visits = defaultdict(int)
 
     for update in range(1, total_updates + 1):
@@ -186,7 +163,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         obs = env.reset()
         obs = unwrap_obs(obs)
 
-        # Rollout storage
         obs_buf = np.zeros((num_steps, num_envs, 64, 64, 3), dtype=np.uint8)
         actions_buf = np.zeros((num_steps, num_envs), dtype=np.int64)
         logprobs_buf = np.zeros((num_steps, num_envs), dtype=np.float32)
@@ -197,7 +173,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         ep_returns = []
         next_done = np.zeros(num_envs, dtype=np.float32)
 
-        # Collect rollout
         for t in range(num_steps):
             global_step += num_envs
 
@@ -224,7 +199,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
             obs = next_obs
             next_done = done.astype(np.float32)
 
-        # Bootstrap value
         with torch.no_grad():
             next_value = agent.get_action_and_value(to_torch_obs(obs, device))[3]
 
@@ -232,7 +206,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         dones_t = torch.from_numpy(dones_buf).to(device)
         values_t = torch.from_numpy(values_buf).to(device)
 
-        # Compute GAE
         adv_t, ret_t = compute_gae(
             rewards=rewards_t,
             dones=dones_t,
@@ -242,13 +215,10 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
             gae_lambda=h.gae_lambda,
         )
 
-        # === CRITICAL FIX ===
-        # Score is the magnitude of GAE (advantages), NOT (returns - values)
-        # The paper explicitly states: S_l = (1/T) * Σ |GAE_t|
         score = calculate_level_score(adv_t, method=score_method)
         buffer.update(level_id=level_id, score=score, global_step=global_step)
 
-        # Flatten batch
+
         b_obs = torch.from_numpy(obs_buf).to(device)
         b_obs = b_obs.permute(0, 1, 4, 2, 3).float() / 255.0
         b_obs = b_obs.reshape(-1, 3, 64, 64)
@@ -259,7 +229,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         b_ret = ret_t.reshape(-1)
         b_val = values_t.reshape(-1)
 
-        # PPO update
         ppo_update(
             agent=agent,
             optimizer=optimizer,
@@ -283,13 +252,11 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
                    f"{sampling_stats['buffer_size']},{sampling_stats['replay_ratio']:.3f},"
                    f"{sampling_stats['current_temperature']:.3f}\n")
 
-        # Console output
         if update % 50 == 0:
             print(f"[{update}/{total_updates}] mode={mode} lvl={level_id} score={score:.4f} "
                   f"ep_ret={mean_ep_return:.2f} buf={len(buffer)} "
                   f"replay={sampling_stats['replay_ratio']:.2f} temp={sampling_stats['current_temperature']:.2f}")
 
-        # Checkpoint
         if update % save_every == 0:
             ckpt_path = os.path.join(run_dir, f"ckpt_{update}.pt")
             torch.save({
@@ -301,7 +268,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
                 "sampling_stats": sampling_stats
             }, ckpt_path)
 
-    # Final save
     final_path = os.path.join(run_dir, "final.pt")
     torch.save({
         "agent": agent.state_dict(),

@@ -11,14 +11,12 @@ import torch.optim as optim
 class Agent(nn.Module):
     def __init__(self, n_actions: int):
         super().__init__()
-        # Input Procgen: (B, 3, 64, 64) uint8 -> float in [0,1]
         self.cnn = nn.Sequential(
             nn.Conv2d(3, 32, 8, stride=4), nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2), nn.ReLU(),
             nn.Conv2d(64, 64, 3, stride=1), nn.ReLU(),
             nn.Flatten(),
         )
-        # calcola dimensione
         with torch.no_grad():
             dummy = torch.zeros(1, 3, 64, 64)
             n_flat = self.cnn(dummy).shape[1]
@@ -61,12 +59,6 @@ def compute_gae(
     gamma: float,
     gae_lambda: float,
 ):
-    """
-    rewards: (T, N)
-    dones:   (T, N)  1.0 se done, 0.0 altrimenti
-    values:  (T, N)
-    next_value: (N,)
-    """
     T, N = rewards.shape
     advantages = torch.zeros_like(rewards)
     lastgaelam = torch.zeros(N, device=rewards.device)
@@ -84,18 +76,17 @@ def ppo_update(
     agent: Agent,
     optimizer: optim.Optimizer,
     h: PPOHParams,
-    obs: torch.Tensor,          # (T*N, 3, 64, 64)
-    actions: torch.Tensor,      # (T*N,)
-    logprobs: torch.Tensor,     # (T*N,)
-    advantages: torch.Tensor,   # (T*N,)
-    returns: torch.Tensor,      # (T*N,)
-    values: torch.Tensor,       # (T*N,)
+    obs: torch.Tensor,          
+    actions: torch.Tensor,     
+    logprobs: torch.Tensor,    
+    advantages: torch.Tensor,   
+    returns: torch.Tensor,      
+    values: torch.Tensor,      
 ):
     Tn = obs.shape[0]
     batch_size = Tn
     minibatch_size = batch_size // h.minibatches
 
-    # normalizza advantages
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     for _ in range(h.update_epochs):
@@ -111,13 +102,11 @@ def ppo_update(
             logratio = new_logprob - logprobs[mb]
             ratio = logratio.exp()
 
-            # policy loss (clipped)
             mb_adv = advantages[mb]
             pg_loss1 = -mb_adv * ratio
             pg_loss2 = -mb_adv * torch.clamp(ratio, 1.0 - h.clip_coef, 1.0 + h.clip_coef)
             pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-            # value loss (clipped)
             v_loss_unclipped = (new_values - returns[mb]) ** 2
             v_clipped = values[mb] + torch.clamp(new_values - values[mb], -h.clip_coef, h.clip_coef)
             v_loss_clipped = (v_clipped - returns[mb]) ** 2

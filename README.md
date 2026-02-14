@@ -2,7 +2,9 @@
 RL project
 
 ## Install
-python -m venv .venv
+This python code is created using python 3.10, because leter version don't support Procgen. If u want to run it we recomand to create a virtual environment with pyhton 3.10:
+
+python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 

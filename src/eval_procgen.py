@@ -162,7 +162,6 @@ def evaluate(cfg, ckpt_path: str, env_name: str, render: bool = False, single_le
                     duration=33,  # ~30 FPS
                     loop=0
                 )
-                print(f"GIF saved! ({len(frames)} frames)")
         
         env.close()
 

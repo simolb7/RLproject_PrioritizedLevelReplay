@@ -16,7 +16,6 @@ from ppo_procgen import Agent, PPOHParams, compute_gae, ppo_update
 
 
 def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_mode: str):
-    """Standard single-level vectorized environment."""
     venv = ProcgenEnv(
         num_envs=num_envs,
         env_name=env_name,
@@ -33,14 +32,12 @@ def make_procgen_vec(env_name: str, num_envs: int, level_id: int, distribution_m
 
 
 def unwrap_obs(obs):
-    """Extract RGB observation from dict if needed."""
     if isinstance(obs, dict):
         return obs["rgb"]
     return obs
 
 
 def to_torch_obs(obs_np: np.ndarray, device: str) -> torch.Tensor:
-    """Convert numpy observation to torch tensor in [0, 1] range."""
     x = torch.from_numpy(obs_np).to(device=device, dtype=torch.float32)
     x = x.permute(0, 3, 1, 2) / 255.0
     return x
@@ -54,26 +51,22 @@ def load_config(path: str):
 def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     cfg = load_config(config_path)
 
-    # Seeds
     seed = int(cfg["train"]["seed"])
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    # Device
+
     device = cfg["train"]["device"]
     if device == "cuda" and not torch.cuda.is_available():
-        print("CUDA not available, using CPU")
         device = "cpu"
 
-    # Output directory
     out_dir = cfg["train"]["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
     run_name = f'{env_name}_baseline_{int(time.time())}'
     run_dir = os.path.join(out_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    # Bootstrap env for action space
     tmp_env = make_procgen_vec(
         env_name,
         cfg["env"]["num_envs"],
@@ -83,7 +76,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
     n_actions = tmp_env.action_space.n
     tmp_env.close()
 
-    # Initialize agent and optimizer
     agent = Agent(n_actions=n_actions).to(device)
     optimizer = optim.Adam(
         agent.parameters(), 
@@ -91,7 +83,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         eps=1e-5
     )
     
-    # PPO hyperparameters
     h = PPOHParams(
         learning_rate=float(cfg["ppo"]["learning_rate"]),
         gamma=float(cfg["ppo"]["gamma"]),
@@ -104,7 +95,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         minibatches=int(cfg["ppo"]["minibatches"]),
     )
 
-    # Training parameters
     total_updates = int(cfg["train"]["total_updates"])
     num_steps = int(cfg["train"]["num_steps"])
     num_envs = int(cfg["env"]["num_envs"])
@@ -113,18 +103,14 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 
     global_step = 0
     
-    # Logging
     log_path = os.path.join(run_dir, "train_log.csv")
     with open(log_path, "w") as f:
         f.write("update,global_step,mode,level_id,score,mean_ep_return\n")
 
-    # Training loop
     for update in range(1, total_updates + 1):
-        # BASELINE: Uniform random level sampling
         level_id = random.randrange(train_level_max)
         mode = "uniform"
 
-        # Create environment for this level
         env = make_procgen_vec(
             env_name=env_name,
             num_envs=num_envs,
@@ -145,7 +131,6 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
         ep_returns = []
         next_done = np.zeros(num_envs, dtype=np.float32)
 
-        # Collect rollout
         for t in range(num_steps):
             global_step += num_envs
 
@@ -172,16 +157,13 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
             obs = next_obs
             next_done = done.astype(np.float32)
 
-        # Bootstrap value
         with torch.no_grad():
             next_value = agent.get_action_and_value(to_torch_obs(obs, device))[3]
 
-        # Convert to tensors
         rewards_t = torch.from_numpy(rewards_buf).to(device)
         dones_t = torch.from_numpy(dones_buf).to(device)
         values_t = torch.from_numpy(values_buf).to(device)
 
-        # Compute GAE
         adv_t, ret_t = compute_gae(
             rewards=rewards_t,
             dones=dones_t,
@@ -191,11 +173,8 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
             gae_lambda=h.gae_lambda,
         )
 
-        # Score for logging (same metric as PLR for fair comparison)
-        # Use GAE magnitude as per paper
         score = float(adv_t.abs().mean().item())
 
-        # Flatten batch for PPO update
         b_obs = torch.from_numpy(obs_buf).to(device)
         b_obs = b_obs.permute(0, 1, 4, 2, 3).float() / 255.0
         b_obs = b_obs.reshape(-1, 3, 64, 64)
@@ -221,17 +200,14 @@ def main(config_path: str = "configs/default.yaml", env_name: str = "coinrun"):
 
         env.close()
 
-        # Logging
         mean_ep_return = float(np.mean(ep_returns)) if len(ep_returns) else float("nan")
         with open(log_path, "a") as f:
             f.write(f"{update},{global_step},{mode},{level_id},{score:.6f},{mean_ep_return}\n")
-
-        # Console output
+            
         if update % 50 == 0:
             print(f"[{update}/{total_updates}] level={level_id} score={score:.4f} "
                   f"mean_ep_return={mean_ep_return:.2f}")
 
-        # Checkpoint
         if update % save_every == 0:
             ckpt_path = os.path.join(run_dir, f"ckpt_{update}.pt")
             torch.save({
